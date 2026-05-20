@@ -42,20 +42,41 @@ public static class ShoppingItemEndpoints
         // POST /api/items
         group.MapPost("/", async (CreateShoppingItemDto dto, AppDbContext db) =>
         {
-            // 如果有給 CategoryId，先確認它存在
+            var item = new ShoppingItem
+            {
+                Name = dto.Name,
+                Quantity = dto.Quantity
+            };
+
             if (dto.CategoryId.HasValue)
             {
                 var exists = await db.Categories.AnyAsync(c => c.Id == dto.CategoryId.Value);
                 if (!exists)
                     return Results.BadRequest(new { error = "Category not found" });
+                item.CategoryId = dto.CategoryId.Value;
+            }
+            else if (!string.IsNullOrWhiteSpace(dto.CategoryName))
+            {
+                var trimmedName = dto.CategoryName.Trim();
+                var category = await db.Categories.FirstOrDefaultAsync(c => c.Name == trimmedName);
+
+                if (category is null)
+                {
+                    // Not exist → Make a new one but don't SaveChanges yet
+                    category = new Category { Name = trimmedName };
+                    db.Categories.Add(category);
+                }
+
+                item.Category = category;  // EF will automatically set CategoryId on SaveChanges
+            }
+            else
+            {
+                return Results.BadRequest(new
+                {
+                    error = "Either categoryId or categoryName must be provided"
+                });
             }
 
-            var item = new ShoppingItem
-            {
-                Name = dto.Name,
-                Quantity = dto.Quantity,
-                CategoryId = dto.CategoryId
-            };
 
             db.ShoppingItems.Add(item);
             await db.SaveChangesAsync();

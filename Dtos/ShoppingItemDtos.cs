@@ -14,7 +14,8 @@ public record ShoppingItemDto(
 public record CreateShoppingItemDto(
     string Name,
     int Quantity,
-    Guid? CategoryId
+    Guid? CategoryId,
+    string? CategoryName
 );
 
 public record UpdateShoppingItemDto(
