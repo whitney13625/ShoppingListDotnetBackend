@@ -31,34 +31,30 @@ public class ShoppingItemService(AppDbContext db) : IShoppingItemService
 
     public async Task<(ShoppingItemDto? Item, string? Error)> CreateAsync(CreateShoppingItemDto dto)
     {
-        var item = new ShoppingItem
-        {
-            Name = dto.Name,
-            Quantity = dto.Quantity
-        };
+        Guid? categoryId;
 
         if (dto.CategoryId.HasValue)
         {
             var exists = await db.Categories.AnyAsync(c => c.Id == dto.CategoryId.Value);
             if (!exists) return (null, "Category not found");
-            item.CategoryId = dto.CategoryId.Value;
+            categoryId = dto.CategoryId.Value;
         }
         else if (!string.IsNullOrWhiteSpace(dto.CategoryName))
         {
-            var trimmedName = dto.CategoryName.Trim();
-            var category = await db.Categories.FirstOrDefaultAsync(c => c.Name == trimmedName);
-
-            if (category is null)
-            {
-                category = new Category { Name = trimmedName };
-                db.Categories.Add(category);
-            }
-            item.Category = category;
+            var category = await GetOrCreateCategoryAsync(dto.CategoryName.Trim());
+            categoryId = category.Id;
         }
         else
         {
             return (null, "Either categoryId or categoryName must be provided");
         }
+
+        var item = new ShoppingItem
+        {
+            Name = dto.Name,
+            Quantity = dto.Quantity,
+            CategoryId = categoryId
+        };
 
         db.ShoppingItems.Add(item);
         await db.SaveChangesAsync();
@@ -69,6 +65,36 @@ public class ShoppingItemService(AppDbContext db) : IShoppingItemService
             .FirstAsync();
 
         return (result, null);
+    }
+
+    private async Task<Category> GetOrCreateCategoryAsync(string name)
+    {
+        var existing = await db.Categories.FirstOrDefaultAsync(c => c.Name == name);
+        if (existing is not null) return existing;
+
+        var category = new Category { Name = name };
+        db.Categories.Add(category);
+
+        try
+        {
+            await db.SaveChangesAsync();
+            return category;
+        }
+        catch (DbUpdateException)
+        {
+            // Race condition: another user just created the category between our "find" and "insert"
+            // → DB's unique index blocks our attempt, throwing DbUpdateException
+
+            // 1. Remove the failed entry from the change tracker to prevent it from affecting future operations
+            db.Entry(category).State = EntityState.Detached;
+
+            // 2. Re-query — the category might have been created by another user
+            var winner = await db.Categories.FirstOrDefaultAsync(c => c.Name == name);
+            if (winner is not null) return winner;
+
+            // 3. Still doesn't exist → not a unique constraint violation, but another DB error → bubble up
+            throw;
+        }
     }
 
     public async Task<(ShoppingItemDto? Item, string? Error)> UpdateAsync(Guid id, UpdateShoppingItemDto dto)
