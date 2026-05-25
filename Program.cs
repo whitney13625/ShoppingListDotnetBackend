@@ -2,6 +2,7 @@ using Scalar.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using ShoppingListApi.Data;
 using ShoppingListApi.Endpoints;
+using ShoppingListApi.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +12,9 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Default")));
+
+builder.Services.AddScoped<ICategoryService, CategoryService>();
+builder.Services.AddScoped<IShoppingItemService, ShoppingItemService>();
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {

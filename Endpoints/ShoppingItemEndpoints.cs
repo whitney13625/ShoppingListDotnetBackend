@@ -1,7 +1,6 @@
-using Microsoft.EntityFrameworkCore;
-using ShoppingListApi.Data;
 using ShoppingListApi.Dtos;
-using ShoppingListApi.Models;
+using ShoppingListApi.Filters;
+using ShoppingListApi.Services;
 
 namespace ShoppingListApi.Endpoints;
 
@@ -12,131 +11,45 @@ public static class ShoppingItemEndpoints
         var group = app.MapGroup("/api/items").WithTags("ShoppingItems");
 
         // GET /api/items
-        group.MapGet("/", async (AppDbContext db) =>
-        {
-            var items = await db.ShoppingItems
-                .Select(i => new ShoppingItemDto(
-                    i.Id, i.Name, i.Quantity, i.Purchased,
-                    i.CategoryId,
-                    i.Category != null ? i.Category.Name : null,
-                    i.CreatedAt, i.UpdatedAt))
-                .ToListAsync();
-            return Results.Ok(items);
-        });
+        group.MapGet("/", async (IShoppingItemService svc) =>
+            Results.Ok(await svc.GetAllAsync()));
+
 
         // GET /api/items/{id}
-        group.MapGet("/{id:guid}", async (Guid id, AppDbContext db) =>
+        group.MapGet("/{id:guid}", async (Guid id, IShoppingItemService svc) =>
         {
-            var item = await db.ShoppingItems
-                .Where(i => i.Id == id)
-                .Select(i => new ShoppingItemDto(
-                    i.Id, i.Name, i.Quantity, i.Purchased,
-                    i.CategoryId,
-                    i.Category != null ? i.Category.Name : null,
-                    i.CreatedAt, i.UpdatedAt))
-                .FirstOrDefaultAsync();
-
+            var item = await svc.GetByIdAsync(id);
             return item is null ? Results.NotFound() : Results.Ok(item);
         });
 
         // POST /api/items
-        group.MapPost("/", async (CreateShoppingItemDto dto, AppDbContext db) =>
+        group.MapPost("/", async (CreateShoppingItemDto dto, IShoppingItemService svc) =>
         {
-            var item = new ShoppingItem
-            {
-                Name = dto.Name,
-                Quantity = dto.Quantity
-            };
-
-            if (dto.CategoryId.HasValue)
-            {
-                var exists = await db.Categories.AnyAsync(c => c.Id == dto.CategoryId.Value);
-                if (!exists)
-                    return Results.BadRequest(new { error = "Category not found" });
-                item.CategoryId = dto.CategoryId.Value;
-            }
-            else if (!string.IsNullOrWhiteSpace(dto.CategoryName))
-            {
-                var trimmedName = dto.CategoryName.Trim();
-                var category = await db.Categories.FirstOrDefaultAsync(c => c.Name == trimmedName);
-
-                if (category is null)
-                {
-                    // Not exist → Make a new one but don't SaveChanges yet
-                    category = new Category { Name = trimmedName };
-                    db.Categories.Add(category);
-                }
-
-                item.Category = category;  // EF will automatically set CategoryId on SaveChanges
-            }
-            else
-            {
-                return Results.BadRequest(new
-                {
-                    error = "Either categoryId or categoryName must be provided"
-                });
-            }
-
-
-            db.ShoppingItems.Add(item);
-            await db.SaveChangesAsync();
-
-            //  Query the category name to return
-            var result = await db.ShoppingItems
-                .Where(i => i.Id == item.Id)
-                .Select(i => new ShoppingItemDto(
-                    i.Id, i.Name, i.Quantity, i.Purchased,
-                    i.CategoryId,
-                    i.Category != null ? i.Category.Name : null, // Category is navigation property, may be null
-                    i.CreatedAt, i.UpdatedAt))
-                .FirstAsync();
-
-            return Results.Created($"/api/items/{item.Id}", result);
-        });
+            var (item, error) = await svc.CreateAsync(dto);
+            return error is not null
+                ? Results.BadRequest(new { error })
+                : Results.Created($"/api/items/{item!.Id}", item);
+        })
+        .AddEndpointFilter<ValidationFilter<CreateShoppingItemDto>>();
 
         // PUT /api/items/{id}
-        group.MapPut("/{id:guid}", async (Guid id, UpdateShoppingItemDto dto, AppDbContext db) =>
+        group.MapPut("/{id:guid}", async (Guid id, UpdateShoppingItemDto dto, IShoppingItemService svc) =>
         {
-            var item = await db.ShoppingItems.FindAsync(id);
-            if (item is null) return Results.NotFound();
-
-            if (dto.CategoryId.HasValue)
+            var (item, error) = await svc.UpdateAsync(id, dto);
+            return (item, error) switch
             {
-                var exists = await db.Categories.AnyAsync(c => c.Id == dto.CategoryId.Value);
-                if (!exists)
-                    return Results.BadRequest(new { error = "Category not found" });
-            }
-
-            if (dto.Name is not null) item.Name = dto.Name;
-            if (dto.Quantity.HasValue) item.Quantity = dto.Quantity.Value;
-            if (dto.Purchased.HasValue) item.Purchased = dto.Purchased.Value;
-            if (dto.CategoryId.HasValue) item.CategoryId = dto.CategoryId.Value;
-            item.UpdatedAt = DateTime.UtcNow;
-
-            await db.SaveChangesAsync();
-
-            var result = await db.ShoppingItems
-                .Where(i => i.Id == item.Id)
-                .Select(i => new ShoppingItemDto(
-                    i.Id, i.Name, i.Quantity, i.Purchased,
-                    i.CategoryId,
-                    i.Category != null ? i.Category.Name : null,
-                    i.CreatedAt, i.UpdatedAt))
-                .FirstAsync();
-
-            return Results.Ok(result);
-        });
+                (not null, _) => Results.Ok(item),
+                (null, not null) => Results.BadRequest(new { error }),
+                (null, null) => Results.NotFound()
+            };
+        })
+        .AddEndpointFilter<ValidationFilter<UpdateShoppingItemDto>>();
 
         // DELETE /api/items/{id}
-        group.MapDelete("/{id:guid}", async (Guid id, AppDbContext db) =>
+        group.MapDelete("/{id:guid}", async (Guid id, IShoppingItemService svc) =>
         {
-            var item = await db.ShoppingItems.FindAsync(id);
-            if (item is null) return Results.NotFound();
-
-            db.ShoppingItems.Remove(item);
-            await db.SaveChangesAsync();
-
-            return Results.NoContent();
+            var deleted = await svc.DeleteAsync(id);
+            return deleted ? Results.NoContent() : Results.NotFound();
         });
     }
 }
