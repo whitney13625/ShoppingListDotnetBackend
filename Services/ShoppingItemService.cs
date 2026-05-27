@@ -35,12 +35,19 @@ public class ShoppingItemService(AppDbContext db) : IShoppingItemService
         var total = await items.CountAsync();
 
         // Normalize pagination input (defensive programming)
-        var page = query.Page < 1 ? 1 : query.Page;
-        var limit = query.Limit switch
+        var page = query.Page.HasValue && query.Page.Value >= 1 ? query.Page.Value : 1;
+        int limit;
+        if(query.Limit.HasValue) {
+            limit = query.Limit.Value switch
+            {
+                < 1 => 20,
+                > 100 => 100, // Always enforce a maximum limit to prevent abuse
+                _ => query.Limit.Value
+            }; 
+        }
+        else 
         {
-            < 1 => 20,
-            > 100 => 100, // Always enforce a maximum limit to prevent abuse
-            _ => query.Limit
+            limit = 20;
         };
 
         // Apply sorting + pagination + projection

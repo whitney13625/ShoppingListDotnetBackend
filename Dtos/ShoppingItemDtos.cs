@@ -4,8 +4,8 @@ namespace ShoppingListApi.Dtos;
 
 public record ShoppingItemQuery
 {
-    public int Page { get; init; } = 1;
-    public int Limit { get; init; } = 20;
+    public int? Page { get; init; } = 1;
+    public int? Limit { get; init; } = 20;
     public Guid? CategoryId { get; init; }
     public bool? Purchased { get; init; }
     public string? Search { get; init; }
