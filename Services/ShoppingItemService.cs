@@ -16,9 +16,49 @@ public class ShoppingItemService(AppDbContext db) : IShoppingItemService
             i.Category != null ? i.Category.Name : null,
             i.CreatedAt, i.UpdatedAt);
 
-    public async Task<IReadOnlyList<ShoppingItemDto>> GetAllAsync()
+    public async Task<PagedResponse<ShoppingItemDto>> GetAllAsync(ShoppingItemQuery query)
     {
-        return await db.ShoppingItems.Select(ToDto).ToListAsync();
+        // Start with an IQueryable —— nothing has run yet
+        var items = db.ShoppingItems.AsQueryable();
+
+        // Condition assembly: add Where only if a value is provided (Composable)
+        if (query.CategoryId.HasValue)
+            items = items.Where(i => i.CategoryId == query.CategoryId.Value);
+
+        if (query.Purchased.HasValue)
+            items = items.Where(i => i.Purchased == query.Purchased.Value);
+
+        if (!string.IsNullOrWhiteSpace(query.Search))
+            items = items.Where(i => i.Name.Contains(query.Search));
+
+        // Calculate the total count of records matching the criteria (before pagination)
+        var total = await items.CountAsync();
+
+        // Normalize pagination input (defensive programming)
+        var page = query.Page < 1 ? 1 : query.Page;
+        var limit = query.Limit switch
+        {
+            < 1 => 20,
+            > 100 => 100, // Always enforce a maximum limit to prevent abuse
+            _ => query.Limit
+        };
+
+        // Apply sorting + pagination + projection
+        var data = await items
+            .OrderByDescending(i => i.CreatedAt)   // Pagination requires a deterministic order
+            .Skip((page - 1) * limit)              // = SQL OFFSET
+            .Take(limit)                           // = SQL LIMIT
+            .Select(ToDto)
+            .ToListAsync();
+
+        var totalPages = (int)Math.Ceiling(total / (double)limit);
+
+        return new PagedResponse<ShoppingItemDto>(
+            Count: data.Count,
+            Total: total,
+            Page: page,
+            TotalPages: totalPages,
+            Data: data);
     }
 
     public async Task<ShoppingItemDto?> GetByIdAsync(Guid id)

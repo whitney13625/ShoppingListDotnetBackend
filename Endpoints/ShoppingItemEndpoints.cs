@@ -11,8 +11,8 @@ public static class ShoppingItemEndpoints
         var group = app.MapGroup("/api/items").WithTags("ShoppingItems");
 
         // GET /api/items
-        group.MapGet("/", async (IShoppingItemService svc) =>
-            Results.Ok(await svc.GetAllAsync()));
+        group.MapGet("/", async ([AsParameters] ShoppingItemQuery query, IShoppingItemService svc) =>
+            Results.Ok(await svc.GetAllAsync(query)));
 
 
         // GET /api/items/{id}
